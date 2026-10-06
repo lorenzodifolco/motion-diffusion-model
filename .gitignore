@@ -138,3 +138,14 @@ slurm**/
 *.err
 *.slurm
 .vscode/
+
+dataset/HumanML3D/
+dataset/KDAEE/
+kit/
+
+# KDAEE-derived data (PhysioNet Restricted Health Data License)
+data/kdaee_hml3d/
+dataset/KDAEE_*/
+dataset/HumanML3D_download/
+
+NOTES_kdaee.md
