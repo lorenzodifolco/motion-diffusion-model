@@ -2,8 +2,11 @@
 
 Folds:
   - 'sanity': 2 test + 2 validation actors (1 F + 1 M each, seeded draw), 18 training actors.
-  - 'loso_<actor>': 1 test actor, 2 validation actors (1 F + 1 M, deterministic rotation), 19 training actors.
-    One LoRA adapter per fold.
+  - 'gkf5_<k>': GroupKFold by actor, 5 folds stratified by gender (4-5 test actors), 1 validation actor drawn
+    from the remaining ones (gender alternating with the fold index), the rest for training (Phase 5, development).
+  - 'loso_<actor>': 1 test actor, 1 validation actor (the next actor in sorted order), 20 training actors.
+    One LoRA adapter per fold; the validation actor is used for LoRA early stopping, XGBoost early stopping and
+    the choice of the CFG scale.
 
 Writes <data>/splits/<fold>/{train,val,test}.txt (window ids, HumanML3D split-file format) and
 <data>/splits/folds.json ({fold: {train: [actors], val: [...], test: [...]}}).
@@ -24,14 +27,26 @@ def sanity_fold(females, males, seed):
     return {'test': sorted([f[0], m[0]]), 'val': sorted([f[1], m[1]])}
 
 
-def loso_folds(females, males):
-    """Test = each actor; val = next actor of the same gender + actor at the same rank of the other gender."""
+def loso_folds(actors):
+    """Test = each actor; val = the next actor in sorted order (cyclic)."""
+    return {f'loso_{a}': {'test': [a], 'val': [actors[(i + 1) % len(actors)]]} for i, a in enumerate(actors)}
+
+
+def group_kfolds(females, males, k, seed):
+    """Gender-stratified GroupKFold over actors (one group per actor): shuffle each gender with `seed`, deal
+    actors round-robin to k folds (males continue where females stopped, so fold sizes differ by <= 1)."""
+    rng = random.Random(seed)
+    f, m = rng.sample(females, len(females)), rng.sample(males, len(males))
+    tests = [[] for _ in range(k)]
+    for i, a in enumerate(f + m):
+        tests[i % k].append(a)
     folds = {}
-    for same, other in ((females, males), (males, females)):
-        for i, actor in enumerate(same):
-            val = [same[(i + 1) % len(same)], other[i % len(other)]]
-            folds[f'loso_{actor}'] = {'test': [actor], 'val': sorted(val)}
-    return dict(sorted(folds.items()))
+    for i, test in enumerate(tests):
+        rest_f = [a for a in f if a not in test]
+        rest_m = [a for a in m if a not in test]
+        val = [rest_f[i % len(rest_f)]] if i % 2 == 0 else [rest_m[i % len(rest_m)]]
+        folds[f'gkf{k}_{i}'] = {'test': sorted(test), 'val': sorted(val)}
+    return folds
 
 
 def main():
@@ -46,7 +61,8 @@ def main():
     females = [a for a in actors if gender[a] == 'Female']
     males = [a for a in actors if gender[a] == 'Male']
 
-    folds = {'sanity': sanity_fold(females, males, args.seed), **loso_folds(females, males)}
+    folds = {'sanity': sanity_fold(females, males, args.seed), **group_kfolds(females, males, 5, args.seed),
+             **loso_folds(actors)}
     for spec in folds.values():
         held = set(spec['test']) | set(spec['val'])
         assert not set(spec['test']) & set(spec['val'])

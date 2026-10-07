@@ -77,3 +77,20 @@ def kdaee_loader(data_root, split_file, batch_size, shuffle=True, drop_last=True
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
                       drop_last=drop_last, collate_fn=partial(t2m_collate, target_batch_size=batch_size),
                       worker_init_fn=_seed_numpy_worker)
+
+
+def respaced_diffusion(args, steps):
+    """Same as utils.model_util.create_gaussian_diffusion (x0 prediction, MSE, fixed small sigma) but with the
+    sampling chain respaced to `steps` evenly spaced timesteps of the original `args.diffusion_steps`."""
+    from diffusion import gaussian_diffusion as gd
+    from diffusion.respace import SpacedDiffusion, space_timesteps
+    return SpacedDiffusion(
+        use_timesteps=space_timesteps(args.diffusion_steps, [steps]),
+        betas=gd.get_named_beta_schedule(args.noise_schedule, args.diffusion_steps, 1.),
+        model_mean_type=gd.ModelMeanType.START_X,
+        model_var_type=gd.ModelVarType.FIXED_SMALL if args.sigma_small else gd.ModelVarType.FIXED_LARGE,
+        loss_type=gd.LossType.MSE,
+        rescale_timesteps=False,
+        lambda_vel=args.lambda_vel, lambda_rcxyz=args.lambda_rcxyz, lambda_fc=args.lambda_fc,
+        lambda_target_loc=getattr(args, 'lambda_target_loc', 0.),
+    )

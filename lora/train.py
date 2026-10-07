@@ -135,6 +135,11 @@ def main():
     text_cache = TextEmbedCache(model)
 
     train_loader = kdaee_loader(args.data, os.path.join(split_dir, 'train.txt'), args.batch_size)
+    # recorded in the checkpoint so downstream code can assert the adapter never saw validation/test subjects
+    meta = {m['id']: m for m in csv.DictReader(open(os.path.join(args.data, 'meta.csv')))}
+    split_actors = {s: sorted({meta[i]['actor'] for i in open(os.path.join(split_dir, s + '.txt')).read().split()})
+                    for s in ('train', 'val', 'test')}
+    assert not set(split_actors['train']) & (set(split_actors['val']) | set(split_actors['test']))
     val_batches, n_val = build_val_set(args.data, os.path.join(split_dir, 'val.txt'), args.val_draws,
                                        args.seed + 1, diffusion.num_timesteps)
     print(f'train windows: {len(train_loader.dataset)}, val windows: {n_val} x {args.val_draws} draws')
@@ -145,6 +150,7 @@ def main():
     base_val = evaluate(model, diffusion, val_batches, device, text_cache)
     print(f'step 0: val loss (pretrained MDM, LoRA = 0) {base_val:.5f}')
     config = dict(vars(args), lora=lora_cfg, params=counts, base_val_loss=base_val, save_dir=save_dir,
+                  split_actors=split_actors,
                   mdm_args={k: v for k, v in vars(mdm_args).items() if isinstance(v, (int, float, str, bool))})
     with open(os.path.join(save_dir, 'config.json'), 'w') as f:
         json.dump(config, f, indent=1)
@@ -177,7 +183,8 @@ def main():
                     best, bad_evals = val, 0
                     torch.save({'lora_state_dict': lora_state_dict(model), 'lora_config': lora_cfg,
                                 'base_model_path': args.model_path, 'fold': args.fold, 'step': step,
-                                'val_loss': val}, os.path.join(save_dir, 'lora_best.pt'))
+                                'val_loss': val, 'train_actors': split_actors['train'],
+                                'val_actors': split_actors['val']}, os.path.join(save_dir, 'lora_best.pt'))
                 else:
                     bad_evals += 1
                 print(f"step {step}: train {row['train_loss']:.5f} val {val:.5f} "

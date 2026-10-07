@@ -127,10 +127,11 @@ def main():
     p.add_argument('--data', default='data/kdaee_hml3d')
     p.add_argument('--fold', default='sanity')
     p.add_argument('--render_per_emotion', type=int, default=2)
+    p.add_argument('--out', default='', help='default: <samples>/../eval')
     p.add_argument('--workers', type=int, default=16)
     p.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = p.parse_args()
-    out_dir = os.path.join(os.path.dirname(os.path.normpath(args.samples)), 'eval')
+    out_dir = args.out or os.path.join(os.path.dirname(os.path.normpath(args.samples)), 'eval')
     os.makedirs(os.path.join(out_dir, 'renders'), exist_ok=True)
 
     meta = {m['id']: m for m in csv.DictReader(open(os.path.join(args.data, 'meta.csv')))}
@@ -247,14 +248,12 @@ def main():
 
     # 5. renders: same ids across all synthetic sets
     jobs = []
-    for emo_code in ['A', 'D', 'F', 'H', 'N', 'SA', 'SU']:
-        for i in range(args.render_per_emotion):
-            sid = f'{emo_code}_{i:03d}'
-            for name, d in synth_dirs.items():
-                m = synth_meta[name][sid]
+    for name, d in synth_dirs.items():
+        for emo in EMOTIONS:
+            for sid in sorted(i for i, m in synth_meta[name].items() if m['emotion'] == emo)[:args.render_per_emotion]:
                 jobs.append((os.path.join(d, 'new_joints', sid + '.npy'),
                              os.path.join(out_dir, 'renders', f'{sid}_{name}.mp4'),
-                             f"{name}: {m['prompt']}"))
+                             f"{name}: {synth_meta[name][sid]['prompt']}"))
     with Pool(args.workers) as pool:
         pool.map(_render, jobs)
     print(f'rendered {len(jobs)} videos to {out_dir}/renders')
